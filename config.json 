@@ -1,0 +1,33 @@
+# config.json
+{
+    "detection_parameters": {
+        "eye_aspect_ratio_threshold": 0.3,
+        "eye_aspect_ratio_consec_frames": 48,
+        "yawn_threshold": 20,
+        "drowsy_frames_threshold": 20
+    },
+    "alerts": {
+        "enable_sound": true,
+        "enable_visual": true,
+        "sound_file": "alarm.wav",
+        "volume": 0.8
+    },
+    "camera": {
+        "source": 0,
+        "resolution": {
+            "width": 640,
+            "height": 480
+        },
+        "fps": 30
+    },
+    "logging": {
+        "enable": true,
+        "log_directory": "logs",
+        "log_level": "INFO"
+    },
+    "dashboard": {
+        "enable": true,
+        "port": 8050,
+        "update_interval": 5
+    }
+}
