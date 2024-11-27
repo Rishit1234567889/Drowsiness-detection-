@@ -1,6 +1,3 @@
-
-
-
 import cv2
 import numpy as np
 import dlib
@@ -79,7 +76,8 @@ class DrowsinessDetector:
             "total_yawns": 0,
             "total_blinks": 0,
             "session_start": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-            "alert_times": []
+            "alert_times": [],
+            "yawn_stages": []
         }
         
         # Initialize dashboard
@@ -166,13 +164,26 @@ class DrowsinessDetector:
         return ear
 
     def compute_mar(self, mouth_points):
-        """Compute the mouth aspect ratio with improved accuracy"""
-        A = np.linalg.norm(mouth_points[2] - mouth_points[10])
-        B = np.linalg.norm(mouth_points[4] - mouth_points[8])
-        C = np.linalg.norm(mouth_points[0] - mouth_points[6])
-        if C == 0:
+        """Compute the mouth aspect ratio with improved accuracy and vertical mouth opening"""
+    # Vertical mouth points
+        top_lip_points = mouth_points[2:5]
+        bottom_lip_points = mouth_points[8:11]
+        
+        # Horizontal mouth points
+        mouth_width_points = [mouth_points[0], mouth_points[6]]
+        
+        # Compute vertical mouth opening
+        vertical_opening = np.mean([np.linalg.norm(np.subtract(top_lip, bottom_lip)) 
+                                    for top_lip, bottom_lip in zip(top_lip_points, bottom_lip_points)])
+        
+        # Compute mouth width
+        mouth_width = np.linalg.norm(np.subtract(mouth_width_points[0], mouth_width_points[1]))
+        
+        # More nuanced mouth aspect ratio calculation
+        if mouth_width == 0:
             return 0.0
-        mar = (A + B) / (2.0 * C)
+        
+        mar = vertical_opening / mouth_width
         return mar
 
     def detect_blink(self, ear):
@@ -189,20 +200,52 @@ class DrowsinessDetector:
             self.COUNTER = 0
 
     def detect_yawn(self, mar):
-        """Improved yawn detection with state tracking"""
-        if mar > self.YAWN_THRESHOLD:
+        """Enhanced yawn detection with multiple stages of yawning"""
+        # Adjust these thresholds based on your specific use case
+        YAWN_THRESHOLD_MILD = 0.4   # Minor mouth opening
+        YAWN_THRESHOLD_MODERATE = 0.6  # Significant mouth opening
+        YAWN_THRESHOLD_SEVERE = 0.8  # Extreme mouth opening
+        
+        YAWN_FRAMES_MILD = 10
+        YAWN_FRAMES_MODERATE = 7
+        YAWN_FRAMES_SEVERE = 5
+        
+        # Categorize yawn intensity
+        if mar > YAWN_THRESHOLD_SEVERE:
+            # Extreme yawn
+            self.yawn_frames += 2
+            current_yawn_stage = "Severe Yawn"
+        elif mar > YAWN_THRESHOLD_MODERATE:
+            # Moderate yawn
             self.yawn_frames += 1
-            if self.yawn_frames >= self.YAWN_CONSEC_FRAMES and not self.is_yawning:
+            current_yawn_stage = "Moderate Yawn"
+        elif mar > YAWN_THRESHOLD_MILD:
+            # Mild yawn
+            self.yawn_frames += 0.5
+            current_yawn_stage = "Mild Yawn"
+        else:
+            # Reset yawn tracking
+            self.yawn_frames = max(0, self.yawn_frames - 0.2)
+            current_yawn_stage = None
+        
+        # Determine yawn detection
+        if self.yawn_frames >= YAWN_FRAMES_MILD:
+            if not self.is_yawning:
                 self.is_yawning = True
                 self.stats["total_yawns"] += 1
-                return True
+                self.stats["yawn_stages"].append(current_yawn_stage)
+                
+                # Optional: Trigger more specific alerts based on yawn intensity
+                if current_yawn_stage == "Severe Yawn":
+                    self.play_alarm()  # More aggressive intervention for severe yawns
+            
+            return True
         else:
-            self.yawn_frames = 0
             self.is_yawning = False
-        return False
+            return False
 
     def process_frame(self):
-        """Process a single frame with improved detection logic"""
+        """Process a single frame with improved detection logic and yawn tracking"""
         ret, frame = self.cap.read()
         if not ret:
             return None, None
@@ -210,6 +253,11 @@ class DrowsinessDetector:
         face_frame = frame.copy()
         gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
         faces = self.detector(gray)
+
+        # Yawn detection constants
+        YAWN_THRESHOLD_MILD = 0.4
+        YAWN_THRESHOLD_MODERATE = 0.6
+        YAWN_THRESHOLD_SEVERE = 0.8
 
         if len(faces) > 0:
             for face in faces:
@@ -227,17 +275,30 @@ class DrowsinessDetector:
                 self.detect_blink(ear)
                 is_yawning = self.detect_yawn(mar)
 
+                # Determine status and color based on detection
                 if ear < self.EYE_ASPECT_RATIO_THRESHOLD and self.COUNTER >= self.EYE_ASPECT_RATIO_CONSEC_FRAMES:
                     self.status = "SLEEPING !!!"
                     self.color = (0, 0, 255)
                     self.play_alarm()
                 elif is_yawning:
-                    self.status = "Yawning !"
-                    self.color = (0, 255, 255)
+                    if mar > YAWN_THRESHOLD_SEVERE:
+                        self.status = "Severe Yawn !!!"
+                        self.color = (0, 0, 255)  # Red for severe yawn
+                    elif mar > YAWN_THRESHOLD_MODERATE:
+                        self.status = "Moderate Yawn !"
+                        self.color = (0, 165, 255)  # Orange for moderate yawn
+                    else:
+                        self.status = "Mild Yawn"
+                        self.color = (0, 255, 255)  # Yellow for mild yawn
+                    
+                    # Play alarm for moderate and severe yawns
+                    if mar > YAWN_THRESHOLD_MODERATE:
+                        self.play_alarm()
                 else:
                     self.status = "Active"
                     self.color = (0, 255, 0)
 
+                # Draw contours for eyes and mouth
                 left_eye_hull = cv2.convexHull(left_eye)
                 right_eye_hull = cv2.convexHull(right_eye)
                 mouth_hull = cv2.convexHull(mouth)
@@ -246,21 +307,23 @@ class DrowsinessDetector:
                 cv2.drawContours(face_frame, [right_eye_hull], -1, (0, 255, 0), 1)
                 cv2.drawContours(face_frame, [mouth_hull], -1, (0, 255, 0), 1)
 
+                # Detailed text overlays
                 cv2.putText(frame, f"EAR: {ear:.2f}", (300, 30),
-                           cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 255), 2)
-                cv2.putText(frame, f"MAR: {mar:.2f}", (300, 60),
-                           cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 255), 2)
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 255), 2)
+                cv2.putText(frame, f"MAR: {mar:.2f} - {self.status}", (300, 60),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 255), 2)
                 cv2.putText(frame, f"Blinks: {self.TOTAL_BLINKS}", (300, 90),
-                           cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 255), 2)
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 255), 2)
                 cv2.putText(frame, f"Yawns: {self.stats['total_yawns']}", (300, 120),
-                           cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 255), 2)
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 255), 2)
                 cv2.putText(frame, self.status, (100, 100),
-                           cv2.FONT_HERSHEY_SIMPLEX, 1.2, self.color, 3)
+                        cv2.FONT_HERSHEY_SIMPLEX, 1.2, self.color, 3)
 
+                # Log the detailed status
                 self.log_status(ear, mar)
         else:
             cv2.putText(frame, "No Face Detected", (100, 100),
-                       cv2.FONT_HERSHEY_SIMPLEX, 1.2, (0, 0, 255), 3)
+                    cv2.FONT_HERSHEY_SIMPLEX, 1.2, (0, 0, 255), 3)
 
         return frame, face_frame
 
