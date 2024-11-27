@@ -87,75 +87,11 @@ class DrowsinessDetector:
         self.start_dashboard()
 
     def start_dashboard(self):
-        """Start the dashboard in a separate thread"""
         try:
-            def run_dashboard():
-                import dash
-                from dash import dcc, html
-                from dash.dependencies import Input, Output
-                import pandas as pd
-                import plotly.graph_objs as go
-                
-                app = dash.Dash(__name__)
-                
-                app.layout = html.Div([
-                    html.H1('Driver Drowsiness Monitoring Dashboard'),
-                    dcc.Interval(id='interval-component', interval=1000, n_intervals=0),
-                    html.Div([
-                        dcc.Graph(id='live-blinks-graph'),
-                        dcc.Graph(id='live-yawns-graph'),
-                        dcc.Graph(id='live-status-graph')
-                    ])
-                ])
-                
-                @app.callback(
-                    [Output('live-blinks-graph', 'figure'),
-                     Output('live-yawns-graph', 'figure'),
-                     Output('live-status-graph', 'figure')],
-                    [Input('interval-component', 'n_intervals')]
-                )
-                def update_graphs(n):
-                    try:
-                        df = pd.read_csv(self.log_file)
-                        df['Timestamp'] = pd.to_datetime(df['Timestamp'])
-                        
-                        blinks_fig = go.Figure()
-                        blinks_fig.add_trace(go.Scatter(
-                            x=df['Timestamp'],
-                            y=df['Blink_Count'],
-                            name='Blinks'
-                        ))
-                        blinks_fig.update_layout(title='Blink Count Over Time')
-                        
-                        yawns_fig = go.Figure()
-                        yawns_fig.add_trace(go.Scatter(
-                            x=df['Timestamp'],
-                            y=df['Yawn_Count'],
-                            name='Yawns'
-                        ))
-                        yawns_fig.update_layout(title='Yawn Count Over Time')
-                        
-                        status_counts = df['Status'].value_counts()
-                        status_fig = go.Figure(data=[go.Pie(
-                            labels=status_counts.index,
-                            values=status_counts.values
-                        )])
-                        status_fig.update_layout(title='Status Distribution')
-                        
-                        return blinks_fig, yawns_fig, status_fig
-                    except Exception as e:
-                        print(f"Error updating dashboard: {e}")
-                        return {}, {}, {}
-                
-                app.run_server(debug=False, port=8050)
-            
-            self.dashboard_thread = threading.Thread(target=run_dashboard, daemon=True)
-            self.dashboard_thread.start()
-            print("Dashboard started at http://localhost:8050")
-            webbrowser.open('http://localhost:8050')
+            from dashboard import start_dashboard
+            self.dashboard_thread = start_dashboard(str(self.log_file))
         except Exception as e:
             print(f"Failed to start dashboard: {e}")
-            self.dashboard_thread = None
 
     def play_alarm(self):
         """Play the alarm sound if available and enough time has passed since last alert"""
